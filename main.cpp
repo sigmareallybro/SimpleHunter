@@ -1,5 +1,4 @@
-// The project is no longer being updated.
-// Use this for the fork (probably).
+// Old Version
 #ifndef UNICODE
 #define UNICODE
 #endif
