@@ -279,8 +279,8 @@ void ShowFilterOptions(HWND listbox) {
     SendMessageW(listbox, LB_RESETCONTENT, 0, 0);
     g_resultsCache.clear();
 
-    SendMessageW(listbox, LB_ADDSTRING, 0, (LPARAM)L"Disk (Scan across all local drives)");
-    SendMessageW(listbox, LB_ADDSTRING, 0, (LPARAM)L"Registry (Search in Windows Registry)");
+    SendMessageW(listbox, LB_ADDSTRING, 0, (LPARAM)L"Disks");
+    SendMessageW(listbox, LB_ADDSTRING, 0, (LPARAM)L"Registry");
     SendMessageW(listbox, LB_SETCURSEL, g_searchRegistry ? 1 : 0, 0);
     UpdateStatusText(L"Viewing Search Source Settings.");
 }
