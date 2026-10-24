@@ -29,6 +29,9 @@
 #define ID_COMBO_EXT        104
 #define ID_BTN_SCANNING     105
 #define ID_BTN_STARTUP      106
+#define ID_BTN_BACK         107
+#define ID_BTN_FORWARD      108
+#define ID_PROGRESS_BAR     109
 
 #define ID_MENU_OPEN        201
 #define ID_MENU_COPY        202
@@ -45,6 +48,9 @@ HWND g_combo = nullptr;
 HWND g_scanBtn = nullptr;
 HWND g_startBtn = nullptr;
 HWND g_searchBtn = nullptr;
+HWND g_backBtn = nullptr;
+HWND g_forwardBtn = nullptr;
+HWND g_progressBar = nullptr;
 HFONT g_font = nullptr;
 
 // Setting search
@@ -54,6 +60,25 @@ std::vector<std::wstring> g_resultsCache;
 bool g_searchRegistry = false; // false = Disk, true = Registry
 bool g_isStartupView = false;
 bool g_isScanningView = false;
+
+// History state navigation
+enum class AppView {
+    Results,
+    Scanning,
+    Startup
+};
+
+AppView g_currentView = AppView::Results;
+AppView g_historyLeft = AppView::Results;
+AppView g_historyRight = AppView::Results;
+
+void UpdateNavigationState(AppView newView) {
+    if (g_currentView != newView) {
+        g_historyLeft = g_currentView;
+        g_historyRight = newView;
+        g_currentView = newView;
+    }
+}
 
 // Expanded Extension Checking
 bool CheckExtension(const std::wstring& fileName, int filterIndex) {
@@ -73,7 +98,9 @@ bool CheckExtension(const std::wstring& fileName, int filterIndex) {
     case 3: // Coding
         return (ext == L".cpp" || ext == L".cs" || ext == L".html" || ext == L".css" ||
             ext == L".js" || ext == L".java" || ext == L".py" || ext == L".asm" ||
-            ext == L".c" || ext == L".dll");
+            ext == L".c" || ext == L".dll" || ext == L".lua" || ext == L".h" ||
+            ext == L".ts" || ext == L".php" || ext == L".rs" || ext == L".kt" ||
+            ext == L".go" || ext == L".sh");
     case 4: // Documents
         return (ext == L".txt" || ext == L".doc" || ext == L".xls" || ext == L".ppt" ||
             ext == L".docm" || ext == L".pdf" || ext == L".odt" || ext == L".rtf" ||
@@ -269,11 +296,12 @@ void AddItemToList(HWND listview, const std::wstring& text) {
 void ShowScanningOptions(HWND listview) {
     g_isScanningView = true;
     g_isStartupView = false;
+    UpdateNavigationState(AppView::Scanning);
     ListView_DeleteAllItems(listview);
     g_resultsCache.clear();
 
     AddItemToList(listview, L"Disks");
-    AddItemToList(listview, L"Registry");
+    AddItemToList(listview, L"Registry Editor");
 
     int sel = g_searchRegistry ? 1 : 0;
     ListView_SetItemState(listview, sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
@@ -282,6 +310,7 @@ void ShowScanningOptions(HWND listview) {
 void ShowStartupItems(HWND listview) {
     g_isStartupView = true;
     g_isScanningView = false;
+    UpdateNavigationState(AppView::Startup);
     ListView_DeleteAllItems(listview);
     g_resultsCache.clear();
 
@@ -357,12 +386,16 @@ void LayoutControls(HWND hwnd) {
     int w = rc.right - rc.left;
     int h = rc.bottom - rc.top;
 
-    MoveWindow(g_edit, 10, 30, w - 280, 25, TRUE);
-    MoveWindow(g_combo, w - 260, 30, 110, 300, TRUE);
-    MoveWindow(g_searchBtn, w - 140, 30, 130, 25, TRUE);
-    MoveWindow(g_list, 10, 70, w - 20, h - 150, TRUE);
-    MoveWindow(g_scanBtn, 10, h - 70, w - 20, 25, TRUE);
-    MoveWindow(g_startBtn, 10, h - 40, w - 20, 25, TRUE);
+    MoveWindow(g_backBtn, 10, 30, 30, 25, TRUE);
+    MoveWindow(g_forwardBtn, 45, 30, 30, 25, TRUE);
+    MoveWindow(g_edit, 85, 30, w - 355, 25, TRUE);
+    MoveWindow(g_combo, w - 265, 30, 110, 300, TRUE);
+    MoveWindow(g_searchBtn, w - 150, 30, 140, 25, TRUE);
+
+    MoveWindow(g_list, 10, 70, w - 20, h - 145, TRUE);
+    MoveWindow(g_progressBar, 10, h - 70, w - 20, 5, TRUE);
+    MoveWindow(g_scanBtn, 10, h - 60, w - 20, 25, TRUE);
+    MoveWindow(g_startBtn, 10, h - 30, w - 20, 25, TRUE);
 
     ListView_SetColumnWidth(g_list, 0, w - 40);
 }
@@ -371,20 +404,22 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     switch (uMsg) {
     case WM_CREATE: {
         SetProcessDPIAware();
-        INITCOMMONCONTROLSEX icex = { sizeof(INITCOMMONCONTROLSEX), ICC_LISTVIEW_CLASSES };
+        INITCOMMONCONTROLSEX icex = { sizeof(INITCOMMONCONTROLSEX), ICC_LISTVIEW_CLASSES | ICC_PROGRESS_CLASS };
         InitCommonControlsEx(&icex);
 
         g_font = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET,
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
             DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
 
-        CreateWindowExW(0, L"STATIC", L"Find name:", WS_VISIBLE | WS_CHILD, 10, 10, 80, 20, hwnd, NULL, NULL, NULL);
-        g_edit = CreateWindowExW(0, L"EDIT", L"", WS_VISIBLE | WS_CHILD | WS_BORDER | ES_AUTOHSCROLL, 10, 30, 200, 25, hwnd, (HMENU)ID_EDIT_INPUT, NULL, NULL);
+        g_backBtn = CreateWindowExW(0, L"BUTTON", L"<", WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, 10, 30, 30, 25, hwnd, (HMENU)ID_BTN_BACK, NULL, NULL);
+        g_forwardBtn = CreateWindowExW(0, L"BUTTON", L">", WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, 45, 30, 30, 25, hwnd, (HMENU)ID_BTN_FORWARD, NULL, NULL);
 
-        CreateWindowExW(0, L"STATIC", L"Format:", WS_VISIBLE | WS_CHILD, 220, 10, 80, 20, hwnd, NULL, NULL, NULL);
-        g_combo = CreateWindowExW(0, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_CHILD | WS_VISIBLE, 220, 30, 110, 300, hwnd, (HMENU)ID_COMBO_EXT, NULL, NULL);
+        CreateWindowExW(0, L"STATIC", L"Find name:", WS_VISIBLE | WS_CHILD, 85, 10, 80, 20, hwnd, NULL, NULL, NULL);
+        g_edit = CreateWindowExW(0, L"EDIT", L"", WS_VISIBLE | WS_CHILD | WS_BORDER | ES_AUTOHSCROLL, 85, 30, 195, 25, hwnd, (HMENU)ID_EDIT_INPUT, NULL, NULL);
 
-        // Expanded Filters List
+        CreateWindowExW(0, L"STATIC", L"Format:", WS_VISIBLE | WS_CHILD, 290, 10, 80, 20, hwnd, NULL, NULL, NULL);
+        g_combo = CreateWindowExW(0, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_CHILD | WS_VISIBLE, 290, 30, 110, 300, hwnd, (HMENU)ID_COMBO_EXT, NULL, NULL);
+
         const wchar_t* filters[] = {
             L"All",
             L"Archives",
@@ -395,21 +430,24 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         for (int i = 0; i < 5; i++) SendMessageW(g_combo, CB_ADDSTRING, 0, (LPARAM)filters[i]);
         SendMessageW(g_combo, CB_SETCURSEL, 0, 0);
 
-        g_searchBtn = CreateWindowExW(0, L"BUTTON", L"Search Now", WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, 330, 30, 140, 25, hwnd, (HMENU)ID_BTN_SEARCH, NULL, NULL);
+        g_searchBtn = CreateWindowExW(0, L"BUTTON", L"Search Now", WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, 410, 30, 140, 25, hwnd, (HMENU)ID_BTN_SEARCH, NULL, NULL);
 
         g_list = CreateWindowExW(0, WC_LISTVIEWW, L"",
             WS_VISIBLE | WS_CHILD | WS_BORDER | LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SINGLESEL,
-            10, 70, 460, 230, hwnd, (HMENU)ID_LIST_RESULTS, NULL, NULL);
+            10, 70, 540, 260, hwnd, (HMENU)ID_LIST_RESULTS, NULL, NULL);
 
         ListView_SetExtendedListViewStyle(g_list, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
         lvc.pszText = (LPWSTR)L"Results";
-        lvc.cx = 440;
+        lvc.cx = 520;
         ListView_InsertColumn(g_list, 0, &lvc);
 
-        g_scanBtn = CreateWindowExW(0, L"BUTTON", L"Scanning", WS_VISIBLE | WS_CHILD, 10, 310, 460, 30, hwnd, (HMENU)ID_BTN_SCANNING, NULL, NULL);
-        g_startBtn = CreateWindowExW(0, L"BUTTON", L"Show Startup Items", WS_VISIBLE | WS_CHILD, 10, 345, 460, 30, hwnd, (HMENU)ID_BTN_STARTUP, NULL, NULL);
+        g_progressBar = CreateWindowExW(0, PROGRESS_CLASSW, NULL, WS_CHILD, 10, 335, 540, 5, hwnd, (HMENU)ID_PROGRESS_BAR, NULL, NULL);
+        SendMessageW(g_progressBar, PBM_SETMARQUEE, (WPARAM)TRUE, 50);
+
+        g_scanBtn = CreateWindowExW(0, L"BUTTON", L"Scanning", WS_VISIBLE | WS_CHILD, 10, 345, 540, 25, hwnd, (HMENU)ID_BTN_SCANNING, NULL, NULL);
+        g_startBtn = CreateWindowExW(0, L"BUTTON", L"Show Startup Items", WS_VISIBLE | WS_CHILD, 10, 375, 540, 25, hwnd, (HMENU)ID_BTN_STARTUP, NULL, NULL);
 
         EnumChildWindows(hwnd, [](HWND child, LPARAM font) -> BOOL {
             SendMessage(child, WM_SETFONT, font, TRUE);
@@ -420,6 +458,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     case WM_SIZE:
         LayoutControls(hwnd);
         break;
+
+    case WM_NOTIFY: {
+        LPNMHDR nmhdr = reinterpret_cast<LPNMHDR>(lParam);
+        if (nmhdr->hwndFrom == g_list && nmhdr->code == LVN_ITEMCHANGED) {
+            LPNMLISTVIEW nmlv = reinterpret_cast<LPNMLISTVIEW>(lParam);
+            if (g_isScanningView && (nmlv->uNewState & LVIS_SELECTED)) {
+                int sel = nmlv->iItem;
+                if (sel == 0) g_searchRegistry = false;
+                else if (sel == 1) g_searchRegistry = true;
+            }
+        }
+        break;
+    }
 
     case WM_CONTEXTMENU:
         if (reinterpret_cast<HWND>(wParam) == g_list) {
@@ -440,12 +491,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     }
     case WM_SEARCH_FINISHED:
         if (g_workerThread.joinable()) g_workerThread.join();
-        MessageBoxW(hwnd, L"Search Complete!", L"Done", MB_OK | MB_ICONINFORMATION);
+        ShowWindow(g_progressBar, SW_HIDE);
         break;
 
     case WM_COMMAND: {
         int id = LOWORD(wParam);
-        int notification = HIWORD(wParam);
 
         if (id == ID_BTN_SEARCH) {
             wchar_t b[256];
@@ -457,6 +507,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
             g_isStartupView = false;
             g_isScanningView = false;
+            UpdateNavigationState(AppView::Results);
             ListView_DeleteAllItems(g_list);
             g_resultsCache.clear();
 
@@ -467,6 +518,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
             if (g_workerThread.joinable()) g_workerThread.join();
             g_cancelSearch = false;
+
+            ShowWindow(g_progressBar, SW_SHOW);
+            SendMessageW(g_progressBar, PBM_SETBARCOLOR, 0, (LPARAM)RGB(0, 200, 0));
+            SetWindowLongPtrW(g_progressBar, GWL_STYLE, GetWindowLongPtrW(g_progressBar, GWL_STYLE) | PBS_MARQUEE);
+            SendMessageW(g_progressBar, PBM_SETMARQUEE, (WPARAM)TRUE, 30);
 
             HWND hMainWnd = hwnd;
             g_workerThread = std::thread([hMainWnd, query, filterIdx, isReg]() {
@@ -484,6 +540,30 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         else if (id == ID_BTN_SCANNING) {
             ShowScanningOptions(g_list);
+        }
+        else if (id == ID_BTN_BACK) {
+            if (g_currentView != g_historyLeft) {
+                g_currentView = g_historyLeft;
+                if (g_currentView == AppView::Startup) ShowStartupItems(g_list);
+                else if (g_currentView == AppView::Scanning) ShowScanningOptions(g_list);
+                else {
+                    g_isStartupView = false;
+                    g_isScanningView = false;
+                    ListView_DeleteAllItems(g_list);
+                }
+            }
+        }
+        else if (id == ID_BTN_FORWARD) {
+            if (g_currentView != g_historyRight) {
+                g_currentView = g_historyRight;
+                if (g_currentView == AppView::Startup) ShowStartupItems(g_list);
+                else if (g_currentView == AppView::Scanning) ShowScanningOptions(g_list);
+                else {
+                    g_isStartupView = false;
+                    g_isScanningView = false;
+                    ListView_DeleteAllItems(g_list);
+                }
+            }
         }
         else if (id == ID_MENU_OPEN) {
             int sel = GetSelectedListViewIndex(g_list);
@@ -512,7 +592,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
                 std::wstring targetPath = g_resultsCache[sel];
 
-                // Check if file is currently running/in use
                 if (!g_isStartupView && IsFileInUse(targetPath)) {
                     MessageBoxW(hwnd, L"Cannot delete file because it is currently running or in use by another process!", L"Error: File Running", MB_OK | MB_ICONERROR);
                     break;
@@ -610,7 +689,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow) {
     HWND hwnd = CreateWindowExW(
         0, L"FileHunterClass", L"SimpleHunter",
         WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, 520, 440,
+        CW_USEDEFAULT, CW_USEDEFAULT, 575, 455,
         NULL, NULL, hInst, NULL
     );
 
